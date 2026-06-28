@@ -29,7 +29,7 @@ jobs:
       - name: 安装依赖
         run: pip install feedparser requests yfinance
 
-      - name: 运行(内部每分钟循环约 4 分钟): 新闻筛选 + 暴力拉升监控
+      - name: "运行(内部每分钟循环约 4 分钟) — 新闻筛选 + 暴力拉升监控"
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
