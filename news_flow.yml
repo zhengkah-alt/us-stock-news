@@ -1,0 +1,44 @@
+name: 美股信息流推送
+
+on:
+  schedule:
+    # 每 10 分钟一次(UTC, GitHub 高峰期可能延迟几分钟)。
+    # 想更勤可改 "*/5 * * * *"; 没有新增新闻时不会调用 Claude, 所以不浪费钱。
+    - cron: "*/10 * * * *"
+  workflow_dispatch:   # 允许手动点击运行(方便测试)
+
+concurrency:
+  group: news-flow
+  cancel-in-progress: false
+
+permissions:
+  contents: write      # 允许把去重记录提交回仓库
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install feedparser requests
+
+      - name: 运行信息流脚本
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python news_flow.py
+
+      - name: 保存去重记录
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_news.json
+          git diff --staged --quiet || git commit -m "update seen_news [skip ci]"
+          git push
