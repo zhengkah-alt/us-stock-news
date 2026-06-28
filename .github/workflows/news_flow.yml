@@ -2,14 +2,15 @@ name: 美股信息流推送
 
 on:
   schedule:
-    # GitHub 定时最快只能每 5 分钟一次, 且高峰期可能延迟。
-    # 真正的"每分钟检查"靠下面运行步骤里的内部循环实现。
+    # 这个定时只是"看门狗": 万一常驻进程结束了, 用它把任务重新拉起来。
+    # 真正的每分钟检查靠下面的常驻循环(单次最长约 5.5 小时)。
     - cron: "*/5 * * * *"
   workflow_dispatch:   # 允许手动点击运行(方便测试)
 
 concurrency:
   group: news-flow
-  cancel-in-progress: false
+  # 常驻单实例: 新的触发会接替正在跑的那个, 避免堆积, 保证一直有一个在跑。
+  cancel-in-progress: true
 
 permissions:
   contents: write      # 允许把去重记录提交回仓库
@@ -29,26 +30,30 @@ jobs:
       - name: 安装依赖
         run: pip install feedparser requests yfinance
 
-      - name: "运行(内部每分钟循环约 4 分钟) — 新闻筛选 + 暴力拉升监控"
+      - name: "常驻运行(每分钟一遍, 单次最长约 5.5 小时)— 新闻 + 暴力拉升"
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          # 在这一次运行内, 每约 60 秒跑一遍, 持续约 4 分钟,
-          # 正好衔接到下一次(每 5 分钟)定时触发 => 实际效果≈每分钟检查一次。
-          # 每轮先跑新闻筛选, 再跑各时段成交量暴力拉升监控。
-          end=$((SECONDS + 240))
-          while [ $SECONDS -lt $end ]; do
-            python news_flow.py || true
-            python market_movers.py || true
-            sleep 30
-          done
-
-      - name: 保存去重/状态记录
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen_news.json 2>/dev/null || true
-          git add movers_state.json 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "update state [skip ci]"
-          git push
+          # 只有"真的推送了"时, 脚本会写出 .need_commit, 这里才把去重/状态提交回仓库。
+          # 这样既能避免重复推送, 又不会每分钟都提交把仓库撑大。
+          commit_if_dirty () {
+            if [ -f .need_commit ]; then
+              rm -f .need_commit
+              git add seen_news.json movers_state.json 2>/dev/null || true
+              git commit -q -m "update state [skip ci]" 2>/dev/null || true
+              git pull --rebase -q origin main 2>/dev/null || true
+              git push -q 2>/dev/null || true
+            fi
+          }
+          # 常驻约 5 小时 40 分(留在 GitHub 6 小时硬上限内); 结束后由定时"看门狗"重新拉起。
+          end=$((SECONDS + 20400))
+          while [ $SECONDS -lt $end ]; do
+            python news_flow.py || true
+            commit_if_dirty
+            python market_movers.py || true
+            commit_if_dirty
+            sleep 60
+          done

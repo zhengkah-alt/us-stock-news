@@ -344,6 +344,10 @@ def main():
 
     if picked:
         push_to_wechat(f"📊 市场要闻 {len(picked)} 条", build_brief(picked))
+        try:
+            open(".need_commit", "w").close()   # 通知 workflow: 推送了, 请保存去重记录
+        except OSError:
+            pass
         print(f"已推送简报, 含 {len(picked)} 条。")
     else:
         print("本次没有达到推送级别的新闻。")

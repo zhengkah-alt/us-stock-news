@@ -192,6 +192,10 @@ def main():
                 f"<br>&nbsp;&nbsp;现价 {h['price']:.2f}{day_txt}"
             )
         push(f"⚡ 暴力拉升 {len(hits)} 只", "".join(lines))
+        try:
+            open(".need_commit", "w").close()   # 通知 workflow: 推送了, 请保存状态
+        except OSError:
+            pass
         print(f"已推送 {len(hits)} 只暴力拉升。")
     else:
         print("本轮无达到阈值的暴力拉升。")
