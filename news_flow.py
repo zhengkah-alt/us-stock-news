@@ -35,7 +35,8 @@ PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "").strip()
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 
 # 推送哪些重要级别: ["high"]=只推重大; ["high","medium"]=重大+值得关注
-PUSH_LEVELS = ["high", "medium"]
+# 按用户要求: 只推"刚发生且对股市影响极大"的, 故只留 high。
+PUSH_LEVELS = ["high"]
 
 # DeepSeek 模型。"deepseek-chat" 是便宜的通用模型, 足够筛新闻。
 # 注: DeepSeek 官方说 deepseek-chat 这个名字将于 2026/07/24 弃用,
@@ -48,12 +49,15 @@ DEEPSEEK_BATCH_SIZE = 25
 # 信息源: 广撒网, 覆盖大盘 / 货币政策 / 宏观数据 / 财报 / 地缘 / 龙头公司。
 # 想盯自己关注的票, 在下面照葫芦画瓢加一行 query 即可。
 QUERIES = [
-    '(stocks OR "Wall Street" OR "S&P 500" OR Nasdaq OR "Dow Jones") when:1d',
-    '("Federal Reserve" OR FOMC OR Powell OR "rate cut" OR "interest rates") when:1d',
-    '(inflation OR CPI OR PCE OR "jobs report" OR GDP OR unemployment OR "nonfarm payrolls") when:1d',
-    '(earnings OR guidance) (Nvidia OR Apple OR Microsoft OR Amazon OR Tesla OR Alphabet OR Meta OR Broadcom) when:1d',
-    '(tariffs OR "trade war" OR sanctions OR OPEC OR "oil prices") when:1d',
-    'source:reuters (markets OR economy OR Fed OR stocks) when:1d',
+    '(stocks OR "Wall Street" OR "S&P 500" OR Nasdaq OR "Dow Jones") when:1h',
+    '("Federal Reserve" OR FOMC OR Powell OR "rate cut" OR "interest rates") when:1h',
+    '(inflation OR CPI OR PCE OR "jobs report" OR GDP OR unemployment OR "nonfarm payrolls") when:1h',
+    '(earnings OR guidance) (Nvidia OR Apple OR Microsoft OR Amazon OR Tesla OR Alphabet OR Meta OR Broadcom) when:1h',
+    # 地缘 / 宏观风险
+    '(war OR conflict OR sanctions OR tariffs OR "trade war" OR geopolitical OR OPEC OR "oil prices") when:1h',
+    # 个股之间的合作 / 并购 / 大单
+    '(merger OR acquisition OR "to acquire" OR partnership OR "strategic partnership" OR "joint venture" OR stake OR "deal with" OR contract) when:1h',
+    'source:reuters (markets OR economy OR Fed OR stocks) when:1h',
 ]
 
 SEEN_FILE = "seen_news.json"
@@ -142,13 +146,16 @@ def _analyze_batch(items):
     """对一批(<= DEEPSEEK_BATCH_SIZE 条)新闻调用一次 DeepSeek。返回 dict: uid -> analysis。"""
     numbered = "\n".join(f'{idx}. {it["title"]}' for idx, it in enumerate(items))
     system = (
-        "你是专业的美股市场信息筛选助手。我会给你一批最新财经新闻标题(英文)。"
-        "请对每一条做四件事:\n"
-        "1) 评估它对美股市场的重要性, 分三级:\n"
-        "   high = 可能显著影响大盘或重要板块(美联储利率决议、重磅经济数据明显超/逊预期、"
-        "重大地缘冲突、龙头公司重大事件、市场剧烈波动);\n"
-        "   medium = 值得关注但影响有限(单一公司财报、行业动态、分析师评级、个股消息);\n"
-        "   low = 噪音、标题党、重复、对市场基本无影响。\n"
+        "你是专业的美股市场信息筛选助手, 只挑出'刚刚发生且对股市影响极大'的硬新闻。"
+        "我会给你一批最新财经新闻标题(英文)。请对每一条做四件事:\n"
+        "1) 评估它对美股市场的重要性, 分三级, 标准要严格:\n"
+        "   high = 真正可能立刻撼动大盘或重要板块/龙头的硬消息, 例如: 美联储利率决议或重磅讲话、"
+        "重磅经济数据明显超/逊预期、重大地缘冲突或战争/制裁/关税升级、龙头公司重大并购/合作/大单/"
+        "暴雷/业绩远超或远逊预期、市场剧烈波动。务必从严, 把握不准就别给 high。\n"
+        "   medium = 值得关注但不至于撼动市场(普通财报、行业动态、分析师评级、一般个股消息)。\n"
+        "   low = 旧闻、噪音、标题党、重复、预告/综述、对市场基本无影响。\n"
+        "特别关注并优先给 high 的题材: 地缘政治冲突、公司之间的并购/战略合作/重大订单。\n"
+        "宁缺毋滥: 只有内容明确、像是刚发生的实锤大事才给 high; 含糊、陈旧、纯观点的一律 low。\n"
         "2) 把标题翻译成简体中文(简洁准确)。\n"
         "3) 判断方向: 利好 / 利空 / 中性。\n"
         "4) 指出主要影响的板块或标的(如'科技股''半导体''能源''美债''AAPL'等), 没有就留空。\n"

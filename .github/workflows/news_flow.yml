@@ -27,26 +27,28 @@ jobs:
           python-version: "3.11"
 
       - name: 安装依赖
-        run: pip install feedparser requests
+        run: pip install feedparser requests yfinance
 
-      - name: 运行信息流脚本(内部每分钟循环约 4 分钟)
+      - name: 运行(内部每分钟循环约 4 分钟): 新闻筛选 + 暴力拉升监控
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           # 在这一次运行内, 每约 60 秒跑一遍, 持续约 4 分钟,
           # 正好衔接到下一次(每 5 分钟)定时触发 => 实际效果≈每分钟检查一次。
-          # 脚本本身约跑 30 秒, 再等 30 秒 => 每轮约 60 秒。
+          # 每轮先跑新闻筛选, 再跑各时段成交量暴力拉升监控。
           end=$((SECONDS + 240))
           while [ $SECONDS -lt $end ]; do
             python news_flow.py || true
+            python market_movers.py || true
             sleep 30
           done
 
-      - name: 保存去重记录
+      - name: 保存去重/状态记录
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen_news.json
-          git diff --staged --quiet || git commit -m "update seen_news [skip ci]"
+          git add seen_news.json 2>/dev/null || true
+          git add movers_state.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "update state [skip ci]"
           git push
