@@ -177,7 +177,7 @@ def fetch_entries():
 
 def _fallback(items):
     return {it["uid"]: {"level": "medium", "zh": it["title"],
-                        "impact": "", "sector": ""} for it in items}
+                        "impact": "", "sector": "", "tickers": ""} for it in items}
 
 
 def analyze_with_deepseek(items):
@@ -197,7 +197,7 @@ def analyze_with_deepseek(items):
     # 兜底: 任何没拿到分析结果的条目, 退回原文标题
     for it in items:
         result.setdefault(it["uid"], {"level": "medium", "zh": it["title"],
-                                      "impact": "", "sector": ""})
+                                      "impact": "", "sector": "", "tickers": ""})
     return result
 
 
@@ -217,10 +217,13 @@ def _analyze_batch(items):
         "宁缺毋滥: 只有内容明确、像是刚发生的实锤大事才给 high; 含糊、陈旧、纯观点的一律 low。\n"
         "2) 把标题翻译成简体中文(简洁准确)。\n"
         "3) 判断方向: 利好 / 利空 / 中性。\n"
-        "4) 指出主要影响的板块或标的(如'科技股''半导体''能源''美债''AAPL'等), 没有就留空。\n"
+        "4) 指出主要影响的板块(如'科技股''半导体''能源''美债'等), 没有就留空。\n"
+        "5) 列出受影响的具体美股代码 ticker(如 AAPL、NVDA、TSLA), 可多个; "
+        "若是大盘/宏观/无明确个股, 给相关指数ETF(如 SPY、QQQ、DIA)或留空。"
+        "只给交易所代码, 不要写公司全名。\n"
         "严格只返回一个 JSON 对象, 格式为 "
         '{"results": [{"i": 序号, "level": "high|medium|low", "zh": "中文标题", '
-        '"impact": "利好|利空|中性", "sector": "板块或标的"}, ...]}。'
+        '"impact": "利好|利空|中性", "sector": "板块", "tickers": ["AAPL","NVDA"]}, ...]}。'
         "不要输出任何额外文字。"
     )
     payload = {
@@ -257,11 +260,17 @@ def _analyze_batch(items):
     for obj in arr:
         i = obj.get("i")
         if isinstance(i, int) and 0 <= i < len(items):
+            tk = obj.get("tickers", "")
+            if isinstance(tk, list):
+                tk = ", ".join(str(x).strip().upper() for x in tk if str(x).strip())
+            else:
+                tk = str(tk).strip().upper()
             result[items[i]["uid"]] = {
                 "level": obj.get("level", "medium"),
                 "zh": obj.get("zh", items[i]["title"]),
                 "impact": obj.get("impact", ""),
                 "sector": obj.get("sector", ""),
+                "tickers": tk,
             }
     return result
 
@@ -278,9 +287,11 @@ def build_brief(picked):
         lines.append(f"<br><b>{LEVEL_EMOJI[level]} {LEVEL_NAME[level]}</b>")
         for p in group:
             a = p["a"]
+            code = a.get("tickers", "")
+            code = f"<b>{code}</b> " if code else ""
             tag = "·".join(x for x in [a.get("impact", ""), a.get("sector", "")] if x)
             tag = f"[{tag}] " if tag else ""
-            lines.append(f"<br>{n}. {tag}<a href='{p['link']}'>{a['zh']}</a>")
+            lines.append(f"<br>{n}. {code}{tag}<a href='{p['link']}'>{a['zh']}</a>")
             n += 1
     return "".join(lines)
 
