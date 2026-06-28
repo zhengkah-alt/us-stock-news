@@ -42,6 +42,9 @@ PUSH_LEVELS = ["high", "medium"]
 #     届时改成 "deepseek-v4-flash"(或按当时官方文档的名字)即可。
 DEEPSEEK_MODEL = "deepseek-chat"
 
+# 每次最多把多少条新闻发给 DeepSeek(分批调用, 防止返回 JSON 过长被截断)。
+DEEPSEEK_BATCH_SIZE = 25
+
 # 信息源: 广撒网, 覆盖大盘 / 货币政策 / 宏观数据 / 财报 / 地缘 / 龙头公司。
 # 想盯自己关注的票, 在下面照葫芦画瓢加一行 query 即可。
 QUERIES = [
@@ -109,13 +112,34 @@ def fetch_entries():
     return list(items.values())
 
 
+def _fallback(items):
+    return {it["uid"]: {"level": "medium", "zh": it["title"],
+                        "impact": "", "sector": ""} for it in items}
+
+
 def analyze_with_deepseek(items):
-    """让 DeepSeek 判断重要性/方向/板块并翻译。返回 dict: uid -> analysis。"""
+    """分批让 DeepSeek 判断重要性/方向/板块并翻译, 合并结果。
+
+    一次只发 DEEPSEEK_BATCH_SIZE 条, 避免返回 JSON 过长被截断。
+    某一批失败只影响那一批(退回原文), 不拖累其它批。
+    """
     if not DEEPSEEK_API_KEY:
         print("警告: 未设置 DEEPSEEK_API_KEY, 跳过智能筛选, 直接推原文标题。")
-        return {it["uid"]: {"level": "medium", "zh": it["title"],
-                            "impact": "", "sector": ""} for it in items}
+        return _fallback(items)
 
+    result = {}
+    for start in range(0, len(items), DEEPSEEK_BATCH_SIZE):
+        batch = items[start:start + DEEPSEEK_BATCH_SIZE]
+        result.update(_analyze_batch(batch))
+    # 兜底: 任何没拿到分析结果的条目, 退回原文标题
+    for it in items:
+        result.setdefault(it["uid"], {"level": "medium", "zh": it["title"],
+                                      "impact": "", "sector": ""})
+    return result
+
+
+def _analyze_batch(items):
+    """对一批(<= DEEPSEEK_BATCH_SIZE 条)新闻调用一次 DeepSeek。返回 dict: uid -> analysis。"""
     numbered = "\n".join(f'{idx}. {it["title"]}' for idx, it in enumerate(items))
     system = (
         "你是专业的美股市场信息筛选助手。我会给你一批最新财经新闻标题(英文)。"
@@ -160,9 +184,8 @@ def analyze_with_deepseek(items):
         parsed = json.loads(text)
         arr = parsed.get("results", []) if isinstance(parsed, dict) else parsed
     except Exception as e:
-        print("DeepSeek 分析失败, 退回原文:", e)
-        return {it["uid"]: {"level": "medium", "zh": it["title"],
-                            "impact": "", "sector": ""} for it in items}
+        print("DeepSeek 分析失败(本批退回原文):", e)
+        return _fallback(items)
 
     result = {}
     for obj in arr:

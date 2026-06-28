@@ -2,9 +2,9 @@ name: 美股信息流推送
 
 on:
   schedule:
-    # 每 10 分钟一次(UTC, GitHub 高峰期可能延迟几分钟)。
-    # 想更勤可改 "*/5 * * * *"; 没有新增新闻时不会调用 Claude, 所以不浪费钱。
-    - cron: "*/10 * * * *"
+    # GitHub 定时最快只能每 5 分钟一次, 且高峰期可能延迟。
+    # 真正的"每分钟检查"靠下面运行步骤里的内部循环实现。
+    - cron: "*/5 * * * *"
   workflow_dispatch:   # 允许手动点击运行(方便测试)
 
 concurrency:
@@ -29,11 +29,19 @@ jobs:
       - name: 安装依赖
         run: pip install feedparser requests
 
-      - name: 运行信息流脚本
+      - name: 运行信息流脚本(内部每分钟循环约 4 分钟)
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: python news_flow.py
+        run: |
+          # 在这一次运行内, 每约 60 秒跑一遍, 持续约 4 分钟,
+          # 正好衔接到下一次(每 5 分钟)定时触发 => 实际效果≈每分钟检查一次。
+          # 脚本本身约跑 30 秒, 再等 30 秒 => 每轮约 60 秒。
+          end=$((SECONDS + 240))
+          while [ $SECONDS -lt $end ]; do
+            python news_flow.py || true
+            sleep 30
+          done
 
       - name: 保存去重记录
         run: |
