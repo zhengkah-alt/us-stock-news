@@ -49,11 +49,17 @@ jobs:
             fi
           }
           # 常驻约 5 小时 40 分(留在 GitHub 6 小时硬上限内); 结束后由定时"看门狗"重新拉起。
+          # 新闻每 ~15 秒查一遍(求时效); 行情暴力拉升每 4 圈(约 60 秒)查一遍,
+          # 避免 Yahoo 高频抓取被限流封 IP(行情本来就是 1 分钟 K 线, 查更勤无意义)。
           end=$((SECONDS + 20400))
+          i=0
           while [ $SECONDS -lt $end ]; do
             python news_flow.py || true
             commit_if_dirty
-            python market_movers.py || true
-            commit_if_dirty
-            sleep 60
+            if [ $((i % 4)) -eq 0 ]; then
+              python market_movers.py || true
+              commit_if_dirty
+            fi
+            i=$((i + 1))
+            sleep 15
           done
