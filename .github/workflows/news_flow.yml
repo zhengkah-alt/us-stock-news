@@ -9,8 +9,9 @@ on:
 
 concurrency:
   group: news-flow
-  # 常驻单实例: 新的触发会接替正在跑的那个, 避免堆积, 保证一直有一个在跑。
-  cancel-in-progress: true
+  # 关键: 不掐断正在跑的常驻进程(否则它可能在"推送完、存记录前"被打断 => 重复推送)。
+  # 看门狗定时触发时只排队等待, 等当前进程自然结束再接班; GitHub 只保留 1 个等待中的。
+  cancel-in-progress: false
 
 permissions:
   contents: write      # 允许把去重记录提交回仓库
@@ -63,3 +64,8 @@ jobs:
             i=$((i + 1))
             sleep 15
           done
+          # 自然结束前, 兜底把完整状态(含未推送的已读)存一次, 交接给下一个常驻进程, 杜绝重复。
+          git add seen_news.json movers_state.json 2>/dev/null || true
+          git commit -q -m "update state [skip ci]" 2>/dev/null || true
+          git pull --rebase -q origin main 2>/dev/null || true
+          git push -q 2>/dev/null || true
