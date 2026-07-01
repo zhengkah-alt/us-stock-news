@@ -223,7 +223,11 @@ def _analyze_batch(items):
         "   medium = 值得关注但不至于撼动市场(普通财报、行业动态、分析师评级、一般个股消息)。\n"
         "   low = 旧闻、噪音、标题党、重复、预告/综述、对市场基本无影响。\n"
         "特别关注并优先给 high 的题材: 地缘政治冲突、公司之间的并购/战略合作/重大订单。\n"
-        "宁缺毋滥: 只有内容明确、像是刚发生的实锤大事才给 high; 含糊、陈旧、纯观点的一律 low。\n"
+        "【必须是一手突发消息】才可能给 high: 即'具体事件刚发生 / 官方或公司刚宣布 / 数据刚公布'。\n"
+        "以下一律判 low(视为二手或非突发, 不要给 high/medium):"
+        "分析、评论、观点、展望、预测、'X 只值得买/关注'、盘点、综述、复盘、回顾、"
+        "'今日看点/前瞻'、解读、科普、榜单、软文, 以及把早前已知消息重新包装的转述报道。\n"
+        "宁缺毋滥: 只有内容明确、确属刚发生的一手实锤大事才给 high; 含糊、陈旧、二手、纯观点的一律 low。\n"
         "2) 把标题翻译成简体中文(简洁准确)。\n"
         "3) 判断方向: 利好 / 利空 / 中性。\n"
         "4) 指出主要影响的板块(如'科技股''半导体''能源''美债'等), 没有就留空。\n"
@@ -341,12 +345,13 @@ def main():
         it["tkey"] = tkey
         all_new.append(it)
 
-    # 只保留"自身发布时间"足够新的(刚刚发生); 没有发布时间的保守保留(避免漏掉)。
+    # 只保留"自身发布时间"确实在 MAX_AGE_MIN 分钟内的(刚刚发生)。
+    # 没有可靠发布时间的一律丢弃 —— 那些往往是几天前的旧稿, 宁可漏掉也不推旧闻。
     now_utc = datetime.now(timezone.utc)
     new_items = []
     for it in all_new:
         p = it.get("published")
-        if p is None or (now_utc - p).total_seconds() <= MAX_AGE_MIN * 60:
+        if p is not None and (now_utc - p).total_seconds() <= MAX_AGE_MIN * 60:
             new_items.append(it)
     print(f"抓取 {len(entries)} 条, 新增 {len(all_new)} 条, "
           f"其中 {MAX_AGE_MIN} 分钟内 {len(new_items)} 条。")
